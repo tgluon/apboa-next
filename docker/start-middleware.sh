@@ -16,6 +16,7 @@ SERVICE_NAME="Apboa 中间件"
 # ==================== 环境初始化 ====================
 init_env() {
   if [ -f "$ENV_FILE" ]; then
+    rm -rf .env
     cp "$ENV_FILE" .env
   fi
 }
@@ -44,7 +45,7 @@ do_rebuild() {
 do_start() {
   echo ">> 启动 ${SERVICE_NAME}..."
   init_env
-  docker compose -f "$COMPOSE_FILE" start
+  docker compose -f docker-compose-middleware-run.yml up -d
   echo "${SERVICE_NAME} 已启动"
 }
 

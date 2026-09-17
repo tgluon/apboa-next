@@ -1,0 +1,81 @@
+# ============================================================
+# Apboa 生产部署 - 中间件服务（docker-compose-middleware.yml）
+# 部署位置：中间件服务器（Server 3）
+# 使用方式：docker compose -f docker-compose-middleware.yml up -d
+# ============================================================
+
+services:
+  # ==================== MySQL ====================
+  apboa-mysql:
+    image: ${DOCKER_REGISTRY}mysql:8.0
+    container_name: apboa-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      TZ: Asia/Shanghai
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - ${DATA_PATH:-./data}/mysql_data:/var/lib/mysql
+      - ../sql/db_init.sql:/docker-entrypoint-initdb.d/db_init.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - apboa
+
+  # ==================== Redis ====================
+  apboa-redis:
+    image: ${DOCKER_REGISTRY}redis:7-alpine
+    container_name: apboa-redis
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TZ: Asia/Shanghai
+    command: sh -c "redis-server --requirepass $$REDIS_PASSWORD"
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - ${DATA_PATH:-./data}/redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - apboa
+
+  # ==================== pgvector（向量库） ====================
+  apboa-pgvector:
+    image: ${DOCKER_REGISTRY}pgvector/pgvector:pg16
+    container_name: apboa-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DATABASE}
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      TZ: Asia/Shanghai
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      - ${DATA_PATH:-./data}/pgvector_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - apboa
+
+networks:
+  apboa:
+    name: apboa
+    driver: bridge

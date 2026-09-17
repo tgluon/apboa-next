@@ -35,12 +35,10 @@ detect_host_info() {
 init_env() {
   detect_host_info
   if [ -f "$ENV_FILE" ]; then
+    rm -rf .env
     cp "$ENV_FILE" .env
-    set -a
-    # shellcheck disable=SC1091
-    source .env
-    set +a
   fi
+
 }
 
 compose() {
@@ -83,7 +81,7 @@ do_rebuild() {
 do_start() {
   echo ">> 启动 ${SERVICE_NAME}..."
   init_env
-  compose start
+  docker compose -f docker-compose-execute-run.yml up -d
   echo "${SERVICE_NAME} 已启动"
 }
 

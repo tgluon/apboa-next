@@ -1,0 +1,144 @@
+# ============================================================
+# Apboa 生产部署 - 执行节点（docker-compose-execute.yml）
+# 部署位置：执行节点服务器（Server 2+），可多实例部署
+# 使用方式：bash start-execute.sh 或 docker compose -f docker-compose-execute.yml up -d --build
+# ============================================================
+
+services:
+  # ==================== AI 运行时（runner-runtime） ====================
+  apboa-runtime:
+    image: docker-apboa-runtime:latest
+    container_name: apboa-runtime
+    restart: unless-stopped
+    # root 运行（业务可信服务，容器隔离承担安全边界），无 cap/security 限制
+    mem_limit: ${RUNTIME_MEM_LIMIT:-4g}
+    cpus: ${RUNTIME_CPU_LIMIT:-4}
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      GATEWAY_ENABLED: "false"
+      MYSQL_HOST: apboa-mysql
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: apboa-redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DATABASE: ${REDIS_DATABASE}
+      JWT_SECRET: ${JWT_SECRET}
+      VECTOR_STORE_TYPE: ${VECTOR_STORE_TYPE}
+      PG_HOST: apboa-pgvector
+      PG_PORT: "5432"
+      PG_DATABASE: ${PG_DATABASE}
+      PG_USER: ${PG_USER}
+      PG_PASSWORD: ${PG_PASSWORD}
+      SHELL_PROXY_ENABLED: "true"
+      PROXY_HOST: apboa-proxy
+      PROXY_PORT: "3062"
+      CONSOLE_HOST: apboa-console
+      RUNTIME_JAVA_HEAP_PERCENTAGE: ${RUNTIME_JAVA_HEAP_PERCENTAGE:-75.0}
+      WEBSOCKET_ENABLED: ${WEBSOCKET_ENABLED:-true}
+      WEBSOCKET_HOST: ${WEBSOCKET_HOST:-apboa-websocket}
+      WEBSOCKET_PORT: ${WEBSOCKET_PORT:-3064}
+      WORKSPACE_CAPACITY_MB: ${WORKSPACE_CAPACITY_MB:-30}
+      APBOA_NODE_ID: ${APBOA_NODE_ID}
+      APBOA_HOST_NAME: ${APBOA_HOST_NAME}
+      APBOA_HOST_IP: ${APBOA_HOST_IP}
+      # Python/Node 依赖安装落盘目录（容器重建后依赖持久化）
+      PIP_TARGET: /opt/tools/pylib
+      PYTHONPATH: /opt/tools/pylib
+      NPM_CONFIG_PREFIX: /opt/tools/npm-global
+      TZ: Asia/Shanghai
+    volumes:
+      - ${LOG_PATH:-./logs}/runtime:/app/logs
+      - ${DATA_PATH:-./data}/.apboa:/app/.apboa
+      - ${DATA_PATH:-./data}/runtime-tools:/opt/tools
+    networks:
+      - apboa
+
+  # ==================== 网关数据面（runner-gateway） ====================
+  apboa-gateway:
+    image: docker-apboa-gateway:latest
+    container_name: apboa-gateway
+    restart: unless-stopped
+    network_mode: host
+    mem_limit: ${GATEWAY_MEM_LIMIT:-4g}
+    cpus: ${GATEWAY_CPU_LIMIT:-4}
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DATABASE: ${REDIS_DATABASE}
+      JWT_SECRET: ${JWT_SECRET}
+      CONSOLE_HOST: 127.0.0.1
+      PROXY_HOST: 127.0.0.1
+      PROXY_PORT: "3062"
+      GATEWAY_ENABLED: "true"
+      GATEWAY_JAVA_HEAP_PERCENTAGE: ${GATEWAY_JAVA_HEAP_PERCENTAGE:-75.0}
+      APBOA_NODE_ID: ${APBOA_NODE_ID:-gateway-simple}
+      APBOA_HOST_NAME: ${APBOA_HOST_NAME}
+      APBOA_HOST_IP: ${APBOA_HOST_IP}
+      TZ: Asia/Shanghai
+    volumes:
+      - ${LOG_PATH:-./logs}/gateway:/app/logs
+      - ${DATA_PATH:-./data}/.apboa:/app/.apboa
+      - ${DATA_PATH:-./data}/runtime-tools:/opt/tools
+    depends_on:
+      apboa-proxy:
+        condition: service_started
+  # ==================== Shell 执行代理（runner-proxy） ====================
+  apboa-proxy:
+    image: docker-apboa-proxy:latest
+    container_name: apboa-proxy
+    restart: unless-stopped
+    # 安全加固：Shell 代理执行不可信命令，必须严格限制
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:exec
+    working_dir: /tmp
+    mem_limit: ${SHELLPROXY_MEM_LIMIT:-1g}
+    cpus: ${SHELLPROXY_CPU_LIMIT:-2}
+    pids_limit: ${SHELLPROXY_PIDS_LIMIT:-200}
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      JAVA_TOOL_OPTIONS: "-Djava.io.tmpdir=/tmp -Dspring.pid.file="
+      CONSOLE_HOST: apboa-console
+      SHELL_DEFAULT_TIMEOUT: ${SHELLPROXY_DEFAULT_TIMEOUT:-300}
+      SHELL_MAX_TIMEOUT: ${SHELLPROXY_MAX_TIMEOUT:-3600}
+      SHELL_MAX_OUTPUT_SIZE: ${SHELLPROXY_MAX_OUTPUT_SIZE:-52428800}
+      SHELLPROXY_JAVA_HEAP_PERCENTAGE: ${SHELLPROXY_JAVA_HEAP_PERCENTAGE:-50.0}
+      # Python/Node 依赖安装落盘目录（read_only 根文件系统下唯一持久化可写点）
+      PIP_TARGET: /opt/tools/pylib
+      PYTHONPATH: /opt/tools/pylib
+      NPM_CONFIG_PREFIX: /opt/tools/npm-global
+      APBOA_NODE_ID: ${APBOA_NODE_ID}
+      APBOA_HOST_NAME: ${APBOA_HOST_NAME}
+      APBOA_HOST_IP: ${APBOA_HOST_IP}
+      TZ: Asia/Shanghai
+    volumes:
+      - ${LOG_PATH:-./logs}/proxy:/app/logs
+      - ${DATA_PATH:-./data}/.apboa:/app/.apboa
+      - ${DATA_PATH:-./data}/proxy-tools:/opt/tools
+    ports:
+      - "3062:3062"
+    networks:
+      - apboa
+
+networks:
+  apboa:
+    name: apboa
+    driver: bridge
