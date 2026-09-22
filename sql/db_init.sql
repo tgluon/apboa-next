@@ -78,6 +78,7 @@ CREATE TABLE `agent_definition` (
   `description` text COMMENT '智能体描述',
   `model_config_id` bigint DEFAULT NULL COMMENT '基础模型配置ID',
   `model_params_override` text COMMENT '模型参数覆盖',
+  `rag_config` text COMMENT '模型参数覆盖',
   `tool_choice_strategy` enum('AUTO','NONE','REQUIRED','SPECIFIC') DEFAULT 'AUTO' COMMENT '工具选择策略',
   `specific_tool_name` varchar(100) DEFAULT NULL COMMENT '指定工具名称（当tool_choice_strategy=SPECIFIC时）',
   `system_prompt_template_id` bigint DEFAULT NULL COMMENT '系统提示词模板ID',
