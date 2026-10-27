@@ -1,0 +1,75 @@
+{{- if .Values.file.enabled }}
+{{- $c := .Values.file }}
+{{- $name := include "apboa.resourceName" (dict "root" . "component" "file") }}
+{{/* runner-file 不监听 HTTP 端口（web-application-type=none），仅向 console 同步文件，
+     因此不创建 Service。仅在 app.storageMode=local 时需要部署。 */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: file
+spec:
+  replicas: {{ $c.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "apboa.selectorLabels" (dict "root" . "component" "file") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apboa.labels" . | nindent 8 }}
+        app.kubernetes.io/component: file
+        {{- with $c.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $c.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with include "apboa.imagePullSecrets" . }}{{ . | nindent 6 }}{{- end }}
+      automountServiceAccountToken: false
+      {{- with include "apboa.podSecurityContext" . }}{{ . | nindent 6 }}{{- end }}
+      containers:
+        - name: file
+          image: {{ include "apboa.image" (dict "root" . "component" $c) }}
+          imagePullPolicy: {{ include "apboa.pullPolicy" (dict "root" . "component" $c) }}
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker
+            - name: TZ
+              value: {{ .Values.global.timezone | quote }}
+            {{- include "apboa.envMysql" . | nindent 12 }}
+            {{- include "apboa.envRedis" . | nindent 12 }}
+            - name: CONSOLE_HOST
+              value: {{ include "apboa.consoleHost" . | quote }}
+            - name: FILE_JAVA_HEAP_PERCENTAGE
+              value: {{ $c.javaHeapPercentage | quote }}
+            {{- with $c.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if $c.probes.enabled }}
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - grep -qa app.jar /proc/1/cmdline
+            periodSeconds: {{ $c.probes.periodSeconds }}
+            failureThreshold: 4
+          {{- end }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "apboa.dataVolumeMount" . | nindent 12 }}
+            {{- include "apboa.logsVolumeMount" (dict "root" . "component" "file" "path" "/app/logs") | nindent 12 }}
+      volumes:
+        {{- include "apboa.dataVolume" . | nindent 8 }}
+        {{- include "apboa.logsVolume" . | nindent 8 }}
+{{- end }}

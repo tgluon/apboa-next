@@ -1,0 +1,97 @@
+{{- if .Values.websocket.enabled }}
+{{- $c := .Values.websocket }}
+{{- $name := include "apboa.resourceName" (dict "root" . "component" "websocket") }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: websocket
+  {{- with $c.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $c.service.type }}
+  ports:
+    - name: ws
+      port: {{ $c.service.port }}
+      targetPort: ws
+  selector:
+    {{- include "apboa.selectorLabels" (dict "root" . "component" "websocket") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: websocket
+spec:
+  replicas: {{ $c.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "apboa.selectorLabels" (dict "root" . "component" "websocket") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apboa.labels" . | nindent 8 }}
+        app.kubernetes.io/component: websocket
+        {{- with $c.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $c.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with include "apboa.imagePullSecrets" . }}{{ . | nindent 6 }}{{- end }}
+      automountServiceAccountToken: false
+      {{- with include "apboa.podSecurityContext" . }}{{ . | nindent 6 }}{{- end }}
+      containers:
+        - name: websocket
+          image: {{ include "apboa.image" (dict "root" . "component" $c) }}
+          imagePullPolicy: {{ include "apboa.pullPolicy" (dict "root" . "component" $c) }}
+          ports:
+            - name: ws
+              containerPort: 3064
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker
+            - name: TZ
+              value: {{ .Values.global.timezone | quote }}
+            {{- include "apboa.envRedis" . | nindent 12 }}
+            {{- include "apboa.envJwt" . | nindent 12 }}
+            - name: CONSOLE_HOST
+              value: {{ include "apboa.consoleHost" . | quote }}
+            - name: WEBSOCKET_JAVA_HEAP_PERCENTAGE
+              value: {{ $c.javaHeapPercentage | quote }}
+            {{- with $c.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if $c.probes.enabled }}
+          startupProbe:
+            tcpSocket:
+              port: ws
+            periodSeconds: 5
+            failureThreshold: {{ $c.probes.startupFailureThreshold }}
+          readinessProbe:
+            tcpSocket:
+              port: ws
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: ws
+            periodSeconds: {{ $c.probes.periodSeconds }}
+            failureThreshold: 4
+          {{- end }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+{{- end }}

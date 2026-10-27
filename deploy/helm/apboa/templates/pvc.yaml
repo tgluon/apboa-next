@@ -1,0 +1,70 @@
+{{- $sc := .Values.global.storageClass -}}
+
+{{- if and .Values.persistence.data.enabled (not .Values.persistence.data.existingClaim) }}
+{{/* 租户 skills / workspaces 共享目录：console、runtime、proxy、file 共用 */}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "apboa.name" . }}-data
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+  {{- if .Values.persistence.data.keep }}
+  annotations:
+    # 卸载 release 时不删除数据卷，避免误删租户数据
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.data.accessModes | nindent 4 }}
+  {{- $dataSc := .Values.persistence.data.storageClass | default $sc }}
+  {{- if $dataSc }}
+  storageClassName: {{ $dataSc | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.data.size }}
+{{- end }}
+
+{{- if and .Values.persistence.tools.enabled (not .Values.persistence.tools.existingClaim) }}
+---
+{{/* runtime / proxy / gateway 安装 Python、Node 依赖的落盘目录（按组件 subPath 隔离） */}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "apboa.name" . }}-tools
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.tools.accessModes | nindent 4 }}
+  {{- $toolsSc := .Values.persistence.tools.storageClass | default $sc }}
+  {{- if $toolsSc }}
+  storageClassName: {{ $toolsSc | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.tools.size }}
+{{- end }}
+
+{{- if and .Values.persistence.logs.enabled (not .Values.persistence.logs.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "apboa.name" . }}-logs
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.logs.accessModes | nindent 4 }}
+  {{- $logsSc := .Values.persistence.logs.storageClass | default $sc }}
+  {{- if $logsSc }}
+  storageClassName: {{ $logsSc | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.logs.size }}
+{{- end }}

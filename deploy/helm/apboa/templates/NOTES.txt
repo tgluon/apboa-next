@@ -1,0 +1,29 @@
+Apboa 已部署到命名空间 {{ .Release.Namespace }}（release: {{ .Release.Name }}）
+
+{{- if .Values.frontend.ingress.enabled }}
+访问地址：http{{ if .Values.frontend.ingress.tls }}s{{ end }}://{{ .Values.frontend.ingress.host }}/
+{{- else if eq .Values.frontend.service.type "NodePort" }}
+访问地址：http://<任一节点 IP>:{{ .Values.frontend.service.nodePort | default "<NodePort，见 kubectl get svc>" }}
+{{- else if eq .Values.frontend.service.type "LoadBalancer" }}
+访问地址：kubectl -n {{ .Release.Namespace }} get svc {{ include "apboa.resourceName" (dict "root" . "component" "frontend") }}
+（等待 EXTERNAL-IP 分配）
+{{- else }}
+前端为 ClusterIP，本地验证：
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "apboa.resourceName" (dict "root" . "component" "frontend") }} 8080:{{ .Values.frontend.service.port }}
+  然后访问 http://localhost:8080/web/
+{{- end }}
+
+查看初始管理员密码 / 数据库密码：
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "apboa.secretName" . }} -o jsonpath='{.data.MYSQL_ROOT_PASSWORD}' | base64 -d
+（默认管理员账号见 db_init.sql：admin / admin@gmail.com）
+
+当前工作负载：
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+首次启动提示：
+  * MySQL 首次初始化会执行 db_init.sql，约需 1-2 分钟，其余服务会重启直到就绪
+  * 若 Pod 一直 Pending，先检查 PVC 是否 Bound（共享目录需要 ReadWriteMany 存储）：
+      kubectl -n {{ .Release.Namespace }} get pvc
+{{- if .Values.gateway.enabled }}{{ if .Values.gateway.hostNetwork }}
+  * gateway 使用 hostNetwork，已发布 API 应用的端口直接占用节点端口，需确认节点端口未被占用
+{{- end }}{{ end }}

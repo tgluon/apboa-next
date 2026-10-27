@@ -1,0 +1,88 @@
+{{- if .Values.middleware.ollama.enabled }}
+{{- $name := include "apboa.resourceName" (dict "root" . "component" "ollama") }}
+{{- $persist := .Values.middleware.ollama.persistence }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 11434
+      targetPort: http
+  selector:
+    {{- include "apboa.selectorLabels" (dict "root" . "component" "ollama") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "apboa.selectorLabels" (dict "root" . "component" "ollama") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apboa.labels" . | nindent 8 }}
+        app.kubernetes.io/component: ollama
+    spec:
+      {{- with include "apboa.imagePullSecrets" . }}{{ . | nindent 6 }}{{- end }}
+      automountServiceAccountToken: false
+      containers:
+        - name: ollama
+          image: {{ include "apboa.image" (dict "root" . "component" .Values.middleware.ollama) }}
+          imagePullPolicy: {{ include "apboa.pullPolicy" (dict "root" . "component" .Values.middleware.ollama) }}
+          ports:
+            - name: http
+              containerPort: 11434
+          env:
+            - name: TZ
+              value: {{ .Values.global.timezone | quote }}
+          resources:
+            {{- toYaml .Values.middleware.ollama.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /root/.ollama
+      volumes:
+        - name: data
+          {{- if $persist.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ $persist.existingClaim }}
+          {{- else if $persist.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $name }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- if and $persist.enabled (not $persist.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-data
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- $sc := $persist.storageClass | default .Values.global.storageClass }}
+  {{- if $sc }}
+  storageClassName: {{ $sc | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $persist.size }}
+{{- end }}
+{{- end }}

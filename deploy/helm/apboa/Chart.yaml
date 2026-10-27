@@ -1,0 +1,16 @@
+apiVersion: v2
+name: apboa
+description: Apboa 智能体平台 — 由 docker/docker-compose-*.yml 迁移的 Kubernetes Helm Chart
+type: application
+version: 0.1.0
+appVersion: "1.0-SNAPSHOT"
+kubeVersion: ">=1.23.0-0"
+keywords:
+  - apboa
+  - agent
+  - ai
+  - agentscope
+maintainers:
+  - name: apboa
+annotations:
+  category: AI Platform

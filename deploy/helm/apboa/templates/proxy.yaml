@@ -1,0 +1,144 @@
+{{- $c := .Values.proxy }}
+{{- $name := include "apboa.resourceName" (dict "root" . "component" "proxy") }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+  {{- with $c.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $c.service.type }}
+  ports:
+    - name: http
+      port: {{ $c.service.port }}
+      targetPort: http
+  selector:
+    {{- include "apboa.selectorLabels" (dict "root" . "component" "proxy") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+spec:
+  replicas: {{ $c.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "apboa.selectorLabels" (dict "root" . "component" "proxy") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apboa.labels" . | nindent 8 }}
+        app.kubernetes.io/component: proxy
+        {{- with $c.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $c.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with include "apboa.imagePullSecrets" . }}{{ . | nindent 6 }}{{- end }}
+      automountServiceAccountToken: false
+      {{- with include "apboa.podSecurityContext" . }}{{ . | nindent 6 }}{{- end }}
+      {{- with include "apboa.nodeSelector" (dict "root" . "component" $c) }}{{ . | nindent 6 }}{{- end }}
+      {{- with include "apboa.tolerations" (dict "root" . "component" $c) }}{{ . | nindent 6 }}{{- end }}
+      {{- with include "apboa.affinity" (dict "root" . "component" $c) }}{{ . | nindent 6 }}{{- end }}
+      containers:
+        - name: proxy
+          image: {{ include "apboa.image" (dict "root" . "component" $c) }}
+          imagePullPolicy: {{ include "apboa.pullPolicy" (dict "root" . "component" $c) }}
+          # ============================================================
+          # 安全加固（对应 compose 的 cap_drop / cap_add / no-new-privileges /
+          # read_only / tmpfs / working_dir）：
+          #   - 根文件系统只读，唯一可写点是 emptyDir 挂载的 /tmp 与数据卷
+          #   - 仅保留 entrypoint 修复卷属主与 gosu 降权所需的 3 个 capability
+          #   - compose 的 pids_limit 在 K8s 无 Pod 级等价字段，
+          #     需要整体限制时由 kubelet --pod-max-pids 或 RuntimeClass 承担
+          # ============================================================
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - SETUID
+                - SETGID
+                - CHOWN
+          workingDir: /tmp
+          ports:
+            - name: http
+              containerPort: 3062
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker
+            - name: TZ
+              value: {{ .Values.global.timezone | quote }}
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Djava.io.tmpdir=/tmp -Dspring.pid.file="
+            - name: CONSOLE_HOST
+              value: {{ include "apboa.consoleHost" . | quote }}
+            - name: SHELL_DEFAULT_TIMEOUT
+              value: {{ $c.shell.defaultTimeout | quote }}
+            - name: SHELL_MAX_TIMEOUT
+              value: {{ $c.shell.maxTimeout | quote }}
+            - name: SHELL_MAX_OUTPUT_SIZE
+              value: {{ $c.shell.maxOutputSize | quote }}
+            - name: SHELLPROXY_JAVA_HEAP_PERCENTAGE
+              value: {{ $c.javaHeapPercentage | quote }}
+            - name: PIP_TARGET
+              value: /opt/tools/pylib
+            - name: PYTHONPATH
+              value: /opt/tools/pylib
+            - name: NPM_CONFIG_PREFIX
+              value: /opt/tools/npm-global
+            {{- include "apboa.envNodeId" . | nindent 12 }}
+            {{- with $c.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if $c.probes.enabled }}
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: {{ $c.probes.startupFailureThreshold }}
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: {{ $c.probes.periodSeconds }}
+            failureThreshold: 4
+          {{- end }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "apboa.dataVolumeMount" . | nindent 12 }}
+            {{- include "apboa.toolsVolumeMount" (dict "root" . "component" "proxy") | nindent 12 }}
+            {{- include "apboa.logsVolumeMount" (dict "root" . "component" "proxy" "path" "/app/logs") | nindent 12 }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        {{- include "apboa.dataVolume" . | nindent 8 }}
+        {{- include "apboa.toolsVolume" . | nindent 8 }}
+        {{- include "apboa.logsVolume" . | nindent 8 }}
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ $c.tmpSizeLimit }}

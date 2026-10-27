@@ -1,0 +1,114 @@
+{{- if .Values.middleware.pgvector.enabled }}
+{{- $name := include "apboa.resourceName" (dict "root" . "component" "pgvector") }}
+{{- $persist := .Values.middleware.pgvector.persistence }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pgvector
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+  selector:
+    {{- include "apboa.selectorLabels" (dict "root" . "component" "pgvector") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pgvector
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "apboa.selectorLabels" (dict "root" . "component" "pgvector") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apboa.labels" . | nindent 8 }}
+        app.kubernetes.io/component: pgvector
+    spec:
+      {{- with include "apboa.imagePullSecrets" . }}{{ . | nindent 6 }}{{- end }}
+      automountServiceAccountToken: false
+      {{- with include "apboa.podSecurityContext" . }}{{ . | nindent 6 }}{{- end }}
+      containers:
+        - name: pgvector
+          image: {{ include "apboa.image" (dict "root" . "component" .Values.middleware.pgvector) }}
+          imagePullPolicy: {{ include "apboa.pullPolicy" (dict "root" . "component" .Values.middleware.pgvector) }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.middleware.pgvector.auth.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.middleware.pgvector.auth.username | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "apboa.secretName" . }}
+                  key: PG_PASSWORD
+            - name: TZ
+              value: {{ .Values.global.timezone | quote }}
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.middleware.pgvector.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      {{- if or $persist.existingClaim (not $persist.enabled) }}
+      volumes:
+        {{- if $persist.existingClaim }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $persist.existingClaim }}
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+      {{- end }}
+  {{- if and $persist.enabled (not $persist.existingClaim) }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "apboa.labels" . | nindent 10 }}
+          app.kubernetes.io/component: pgvector
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- $sc := $persist.storageClass | default .Values.global.storageClass }}
+        {{- if $sc }}
+        storageClassName: {{ $sc | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $persist.size }}
+  {{- end }}
+{{- end }}

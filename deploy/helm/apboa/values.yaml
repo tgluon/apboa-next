@@ -1,0 +1,467 @@
+# ============================================================
+# Apboa Helm Chart values
+# ------------------------------------------------------------
+# 本文件是 docker/docker-compose-simple.yml（单机全量）与
+# docker-compose-console.yml + docker-compose-execute.yml（分离部署）
+# 的 Kubernetes 等价配置，变量名与 compose 中的 environment 一一对应。
+#
+# 快速开始：
+#   helm install apboa ./deploy/helm/apboa -n apboa --create-namespace
+# 外部中间件（不部署 MySQL/Redis/pgvector）：
+#   helm install apboa ./deploy/helm/apboa -n apboa --create-namespace \
+#     --set middleware.mysql.enabled=false \
+#     --set middleware.redis.enabled=false \
+#     --set middleware.pgvector.enabled=false \
+#     --set external.mysql.host=10.0.0.10 ...
+# ============================================================
+
+# ------------------------------------------------------------
+# 全局命名
+# ------------------------------------------------------------
+# 所有 K8s 资源（含 Service）名字前缀。默认 apboa，最终形如
+# apboa-console / apboa-runtime / apboa-mysql ...
+#
+# 重要：前端的 nginx.conf 在镜像构建期写入，其中控制台上游被硬编码为
+#       apboa-console:3060。若修改 namePrefix，必须同时重建前端镜像
+#       （或自行挂载 nginx.conf），否则 /api/ 反向代理会 502。
+namePrefix: apboa
+
+global:
+  timezone: Asia/Shanghai
+  # 私有镜像仓库前缀，等价于 compose 的 DOCKER_REGISTRY，例如 harbor.example.com/apboa
+  # 注意：这里不加协议头，也不带结尾斜杠
+  imageRegistry: ""
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+  # 默认 StorageClass（留空使用集群默认）
+  storageClass: ""
+  # 全局调度约束（各组件可单独覆盖）
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ------------------------------------------------------------
+# 中间件：MySQL / Redis / pgvector(向量库) / ollama
+# 关闭某个 enabled 后，使用 external.* 中配置的地址
+# ------------------------------------------------------------
+middleware:
+  mysql:
+    enabled: true
+    image:
+      repository: mysql
+      tag: "8.0"
+      pullPolicy: ""
+    auth:
+      # 留空则首次安装自动生成随机密码，后续 upgrade 从集群中的 Secret 复用
+      rootPassword: ""
+      database: apboa_next
+      # 应用连接账号；compose 中直接使用 root，保持一致
+      username: root
+      # 留空则与 rootPassword 相同
+      password: ""
+    # 首次初始化数据目录时执行 files/db_init.sql（等价于 compose 的
+    # /docker-entrypoint-initdb.d 挂载）。仅在数据目录为空时生效。
+    initdb:
+      enabled: true
+    # 单机小规模部署用 Deployment 即可；如需稳定网络标识可切 StatefulSet（见模板注释）
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: ""
+      existingClaim: ""
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 2Gi
+
+  redis:
+    enabled: true
+    image:
+      repository: redis
+      tag: 7-alpine
+      pullPolicy: ""
+    auth:
+      password: ""
+    persistence:
+      enabled: true
+      size: 2Gi
+      storageClass: ""
+      existingClaim: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+
+  pgvector:
+    enabled: true
+    image:
+      repository: pgvector/pgvector
+      tag: pg16
+      pullPolicy: ""
+    auth:
+      database: apboa_vector
+      username: postgres
+      password: ""
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: ""
+      existingClaim: ""
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: "2"
+        memory: 2Gi
+
+  # 本地大模型（可选，compose 中仅有 middleware-run 版本包含）
+  ollama:
+    enabled: false
+    image:
+      repository: ollama/ollama
+      tag: latest
+      pullPolicy: ""
+    persistence:
+      enabled: true
+      size: 50Gi
+      storageClass: ""
+      existingClaim: ""
+    resources:
+      requests:
+        cpu: 500m
+        memory: 4Gi
+      limits:
+        cpu: "4"
+        memory: 8Gi
+
+# ------------------------------------------------------------
+# 外部中间件（middleware.*.enabled=false 时生效）
+# ------------------------------------------------------------
+external:
+  mysql:
+    host: ""
+    port: 3306
+    database: apboa_next
+    username: root
+    password: ""
+  redis:
+    host: ""
+    port: 6379
+    database: 7
+    password: ""
+  pgvector:
+    host: ""
+    port: 5432
+    database: apboa_vector
+    username: postgres
+    password: ""
+
+# ------------------------------------------------------------
+# 应用级公共配置
+# ------------------------------------------------------------
+app:
+  # JWT 签名密钥；留空则首次安装自动生成并复用（compose 的 JWT_SECRET）
+  jwtSecret: ""
+  # shared：console 与 runtime 共享 .apboa 目录（需 RWX 存储，推荐 NFS）
+  # local ：每个执行节点本地存储，由 runner-file 回传 console（需启用 file）
+  storageMode: shared
+  # WORKSPACE_CAPACITY_MB
+  workspaceCapacityMb: 30
+  # VECTOR_STORE_TYPE
+  vectorStoreType: pgvector
+
+# ------------------------------------------------------------
+# 管理控制台（runner-console，3060）
+# ------------------------------------------------------------
+console:
+  replicaCount: 1
+  image:
+    repository: docker-apboa-console
+    tag: latest
+    pullPolicy: ""
+  # CONSOLE_JAVA_HEAP_PERCENTAGE
+  javaHeapPercentage: "75.0"
+  service:
+    type: ClusterIP
+    port: 3060
+    annotations: {}
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 2Gi
+  probes:
+    enabled: true
+    startupFailureThreshold: 40
+    periodSeconds: 15
+  podAnnotations: {}
+  podLabels: {}
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ------------------------------------------------------------
+# AI 运行时（runner-runtime，3061）—— 可多副本
+# ------------------------------------------------------------
+runtime:
+  replicaCount: 1
+  image:
+    repository: docker-apboa-runtime
+    tag: latest
+    pullPolicy: ""
+  # RUNTIME_JAVA_HEAP_PERCENTAGE
+  javaHeapPercentage: "75.0"
+  service:
+    type: ClusterIP
+    port: 3061
+    annotations: {}
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      cpu: "4"
+      memory: 4Gi
+  probes:
+    enabled: true
+    startupFailureThreshold: 40
+    periodSeconds: 15
+  # Agent 长任务收尾时间
+  terminationGracePeriodSeconds: 60
+  podAnnotations: {}
+  podLabels: {}
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ------------------------------------------------------------
+# Shell 执行代理（runner-proxy，3062）—— 执行不可信命令，安全加固最严
+# ------------------------------------------------------------
+proxy:
+  replicaCount: 1
+  image:
+    repository: docker-apboa-proxy
+    tag: latest
+    pullPolicy: ""
+  # SHELLPROXY_JAVA_HEAP_PERCENTAGE（其余内存留给 shell 子进程）
+  javaHeapPercentage: "50.0"
+  shell:
+    defaultTimeout: 300
+    maxTimeout: 3600
+    maxOutputSize: 52428800
+  service:
+    type: ClusterIP
+    port: 3062
+    annotations: {}
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  probes:
+    enabled: true
+    startupFailureThreshold: 40
+    periodSeconds: 15
+  # 只读根文件系统下可写目录（tmpfs）；compose 中为 tmpfs /tmp:exec
+  tmpSizeLimit: 1Gi
+  podAnnotations: {}
+  podLabels: {}
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ------------------------------------------------------------
+# 网关数据面（runner-gateway，无固定端口）
+# ------------------------------------------------------------
+gateway:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: docker-apboa-gateway
+    tag: latest
+    pullPolicy: ""
+  # GATEWAY_JAVA_HEAP_PERCENTAGE
+  javaHeapPercentage: "75.0"
+  # 已发布的 API 应用会监听「用户在控制台配置的任意端口」，因此必须与宿主机
+  # 共享网络命名空间。compose 中同样是 network_mode: host。
+  # 关闭后网关只能使用 pod 网络，动态端口的应用将无法从集群外访问。
+  hostNetwork: true
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 4Gi
+  # 无固定监听端口，默认用 /proc/1/cmdline 存活探针
+  probes:
+    enabled: true
+    periodSeconds: 20
+  podAnnotations: {}
+  podLabels: {}
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ------------------------------------------------------------
+# WebSocket 推送服务（runner-websocket，3064）
+# ------------------------------------------------------------
+websocket:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: docker-apboa-websocket
+    tag: latest
+    pullPolicy: ""
+  # WEBSOCKET_JAVA_HEAP_PERCENTAGE
+  javaHeapPercentage: "50.0"
+  service:
+    type: ClusterIP
+    port: 3064
+    annotations: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  probes:
+    enabled: true
+    startupFailureThreshold: 40
+    periodSeconds: 15
+  podAnnotations: {}
+  podLabels: {}
+  extraEnv: []
+
+# ------------------------------------------------------------
+# 文件同步服务（runner-file，无 Web 端口）
+# 仅在 app.storageMode=local 时需要（compose 中的 local 本地存储模式）
+# ------------------------------------------------------------
+file:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: docker-apboa-file
+    tag: latest
+    pullPolicy: ""
+  # FILE_JAVA_HEAP_PERCENTAGE
+  javaHeapPercentage: "60.0"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  probes:
+    enabled: false
+    periodSeconds: 30
+  podAnnotations: {}
+  podLabels: {}
+  extraEnv: []
+
+# ------------------------------------------------------------
+# 前端（Nginx + 静态资源，80）
+# ------------------------------------------------------------
+frontend:
+  replicaCount: 1
+  image:
+    repository: docker-apboa-frontend
+    tag: latest
+    pullPolicy: ""
+  service:
+    type: ClusterIP
+    port: 80
+    # type=NodePort 时生效，留空由集群分配
+    nodePort: ""
+    annotations: {}
+  ingress:
+    enabled: false
+    className: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: 100m
+      # 大模型流式响应 / AG-UI 长连接
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    host: apboa.example.com
+    path: /
+    pathType: Prefix
+    tls: []
+    #  - secretName: apboa-tls
+    #    hosts:
+    #      - apboa.example.com
+  # 供镜像内 nginx.conf 的 envsubst 使用；留空自动指向集群内 Service
+  env:
+    runtimeHost: ""
+    runtimePort: 3061
+    websocketHost: ""
+    websocketPort: 3064
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  probes:
+    enabled: true
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ------------------------------------------------------------
+# 持久化
+# ------------------------------------------------------------
+persistence:
+  # .apboa：租户 skills / workspaces，console、runtime、proxy、file 共享同一份
+  # 多节点必须使用支持 ReadWriteMany 的存储（NFS / CephFS / Longhorn RWX 等）
+  # 单节点集群（kind / minikube / docker-desktop）可改为 ReadWriteOnce
+  data:
+    enabled: true
+    existingClaim: ""
+    accessModes:
+      - ReadWriteMany
+    size: 20Gi
+    storageClass: ""
+    # helm uninstall 时保留数据卷（再次安装前需手动删除或改名，否则会冲突）
+    keep: true
+  # /opt/tools：runtime / proxy 安装 Python、Node 依赖的落盘目录
+  tools:
+    enabled: true
+    existingClaim: ""
+    accessModes:
+      - ReadWriteMany
+    size: 5Gi
+    storageClass: ""
+  # /app/logs：默认 emptyDir（容器日志已落 stdout）；需要留存时改 true
+  # 该卷被 console/runtime/proxy/gateway/file/frontend 共用，因此同样需要 RWX
+  logs:
+    enabled: false
+    existingClaim: ""
+    accessModes:
+      - ReadWriteMany
+    size: 10Gi
+    storageClass: ""
+
+# 容器运行用户。镜像默认以 root 运行（proxy 由 entrypoint 内 gosu 降权到 1002）；
+# NFS 开启 root_squash 时可通过 fsGroup 调整挂载目录属组。
+securityContext:
+  fsGroup: ""

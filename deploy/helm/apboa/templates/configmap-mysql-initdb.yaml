@@ -1,0 +1,17 @@
+{{- if and .Values.middleware.mysql.enabled .Values.middleware.mysql.initdb.enabled }}
+{{/*
+初始化脚本：等价 compose 中
+  ../sql/db_init.sql:/docker-entrypoint-initdb.d/db_init.sql:ro
+官方 mysql 镜像仅在 /var/lib/mysql 为空时执行该目录下的脚本。
+内容来自 sql/db_init.sql（复制到 chart 的 files/ 下，Helm 无法引用 chart 外的文件）。
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "apboa.name" . }}-mysql-initdb
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+data:
+  db_init.sql: |-
+{{ .Files.Get "files/db_init.sql" | indent 4 }}
+{{- end }}

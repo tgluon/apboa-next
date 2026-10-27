@@ -1,0 +1,162 @@
+{{- $c := .Values.frontend }}
+{{- $name := include "apboa.resourceName" (dict "root" . "component" "frontend") }}
+{{- $runtimeHost := $c.env.runtimeHost | default (include "apboa.resourceName" (dict "root" . "component" "runtime")) }}
+{{- $wsHost := $c.env.websocketHost | default (include "apboa.resourceName" (dict "root" . "component" "websocket")) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+  {{- with $c.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $c.service.type }}
+  ports:
+    - name: http
+      port: {{ $c.service.port }}
+      targetPort: http
+      {{- if and (eq $c.service.type "NodePort") $c.service.nodePort }}
+      nodePort: {{ $c.service.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "apboa.selectorLabels" (dict "root" . "component" "frontend") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ $c.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "apboa.selectorLabels" (dict "root" . "component" "frontend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apboa.labels" . | nindent 8 }}
+        app.kubernetes.io/component: frontend
+        {{- with $c.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $c.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with include "apboa.imagePullSecrets" . }}{{ . | nindent 6 }}{{- end }}
+      automountServiceAccountToken: false
+      {{- with include "apboa.nodeSelector" (dict "root" . "component" $c) }}{{ . | nindent 6 }}{{- end }}
+      {{- with include "apboa.tolerations" (dict "root" . "component" $c) }}{{ . | nindent 6 }}{{- end }}
+      {{- with include "apboa.affinity" (dict "root" . "component" $c) }}{{ . | nindent 6 }}{{- end }}
+      containers:
+        - name: frontend
+          image: {{ include "apboa.image" (dict "root" . "component" $c) }}
+          imagePullPolicy: {{ include "apboa.pullPolicy" (dict "root" . "component" $c) }}
+          # 对应 compose 的 entrypoint：启动前用 envsubst 把 upstream 地址
+          # 写入镜像内置的 /etc/nginx/conf.d/default.conf
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              set -e
+              envsubst '$RUNTIME_HOST $RUNTIME_PORT $WEBSOCKET_HOST $WEBSOCKET_PORT' < /etc/nginx/conf.d/default.conf > /etc/nginx/conf.d/default.conf.tmp
+              mv /etc/nginx/conf.d/default.conf.tmp /etc/nginx/conf.d/default.conf
+              exec nginx -g 'daemon off;'
+          ports:
+            - name: http
+              containerPort: 80
+          env:
+            - name: TZ
+              value: {{ .Values.global.timezone | quote }}
+            - name: RUNTIME_HOST
+              value: {{ $runtimeHost | quote }}
+            - name: RUNTIME_PORT
+              value: {{ $c.env.runtimePort | quote }}
+            - name: WEBSOCKET_HOST
+              value: {{ $wsHost | quote }}
+            - name: WEBSOCKET_PORT
+              value: {{ $c.env.websocketPort | quote }}
+          {{- if $c.probes.enabled }}
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 20
+            failureThreshold: 4
+          {{- end }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+          volumeMounts:
+            - name: logs
+              mountPath: /var/log/nginx
+              {{- if .Values.persistence.logs.enabled }}
+              subPath: frontend
+              {{- end }}
+      volumes:
+        - name: logs
+          {{- if .Values.persistence.logs.enabled }}
+          {{- if .Values.persistence.logs.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.logs.existingClaim }}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "apboa.name" . }}-logs
+          {{- end }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- if $c.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+  {{- with $c.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if $c.ingress.className }}
+  ingressClassName: {{ $c.ingress.className }}
+  {{- end }}
+  {{- with $c.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ $c.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ $c.ingress.path }}
+            pathType: {{ $c.ingress.pathType }}
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  number: {{ $c.service.port }}
+{{- end }}

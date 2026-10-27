@@ -14,6 +14,7 @@ spring:
       write-dates-as-timestamps: false
   # Flyway 数据库迁移配置
   flyway:
+    enabled: false
     locations: classpath:db/migration
     # 存量库（已通过 sql/db_init.sql 初始化）启动时自动创建历史表并标记基线 V1，增量脚本从 V2__ 开始
     baseline-on-migrate: true

@@ -1,0 +1,126 @@
+{{- if .Values.middleware.mysql.enabled }}
+{{- $name := include "apboa.resourceName" (dict "root" . "component" "mysql") }}
+{{- $persist := .Values.middleware.mysql.persistence }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mysql
+spec:
+  type: ClusterIP
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql
+  selector:
+    {{- include "apboa.selectorLabels" (dict "root" . "component" "mysql") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mysql
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "apboa.selectorLabels" (dict "root" . "component" "mysql") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apboa.labels" . | nindent 8 }}
+        app.kubernetes.io/component: mysql
+    spec:
+      {{- with include "apboa.imagePullSecrets" . }}{{ . | nindent 6 }}{{- end }}
+      automountServiceAccountToken: false
+      {{- with include "apboa.podSecurityContext" . }}{{ . | nindent 6 }}{{- end }}
+      containers:
+        - name: mysql
+          image: {{ include "apboa.image" (dict "root" . "component" .Values.middleware.mysql) }}
+          imagePullPolicy: {{ include "apboa.pullPolicy" (dict "root" . "component" .Values.middleware.mysql) }}
+          args:
+            - --character-set-server=utf8mb4
+            - --collation-server=utf8mb4_unicode_ci
+            - --default-time-zone=+08:00
+          ports:
+            - name: mysql
+              containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "apboa.secretName" . }}
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_DATABASE
+              value: {{ .Values.middleware.mysql.auth.database | quote }}
+            - name: TZ
+              value: {{ .Values.global.timezone | quote }}
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - mysqladmin ping -h 127.0.0.1 -u root -p"$MYSQL_ROOT_PASSWORD"
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - mysqladmin ping -h 127.0.0.1 -u root -p"$MYSQL_ROOT_PASSWORD"
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.middleware.mysql.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+            {{- if .Values.middleware.mysql.initdb.enabled }}
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+            {{- end }}
+      {{- if or $persist.existingClaim (not $persist.enabled) .Values.middleware.mysql.initdb.enabled }}
+      volumes:
+        {{- if $persist.existingClaim }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $persist.existingClaim }}
+        {{- else if not $persist.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.middleware.mysql.initdb.enabled }}
+        - name: initdb
+          configMap:
+            name: {{ include "apboa.name" . }}-mysql-initdb
+        {{- end }}
+      {{- end }}
+  {{- if and $persist.enabled (not $persist.existingClaim) }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "apboa.labels" . | nindent 10 }}
+          app.kubernetes.io/component: mysql
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- $sc := $persist.storageClass | default .Values.global.storageClass }}
+        {{- if $sc }}
+        storageClassName: {{ $sc | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $persist.size }}
+  {{- end }}
+{{- end }}

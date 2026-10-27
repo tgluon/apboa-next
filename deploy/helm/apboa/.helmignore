@@ -1,0 +1,9 @@
+# 依赖与构建产物
+charts/
+*.tgz
+*.tar.gz
+
+# 本地调试
+values.local.yaml
+values-*.local.yaml
+.DS_Store

@@ -1,0 +1,99 @@
+{{- if .Values.gateway.enabled }}
+{{- $c := .Values.gateway }}
+{{- $name := include "apboa.resourceName" (dict "root" . "component" "gateway") }}
+{{/* 网关数据面不提供固定服务端口：已发布应用监听的端口由用户在控制台配置，
+     Pod 直接共享宿主机网络命名空间（等价 compose 的 network_mode: host）。
+     因此这里不创建 Service。 */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "apboa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: {{ $c.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "apboa.selectorLabels" (dict "root" . "component" "gateway") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apboa.labels" . | nindent 8 }}
+        app.kubernetes.io/component: gateway
+        {{- with $c.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $c.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with include "apboa.imagePullSecrets" . }}{{ . | nindent 6 }}{{- end }}
+      automountServiceAccountToken: false
+      {{- if $c.hostNetwork }}
+      hostNetwork: true
+      # hostNetwork 下必须显式声明，否则 Pod 内无法解析集群 Service 名
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
+      {{- with include "apboa.podSecurityContext" . }}{{ . | nindent 6 }}{{- end }}
+      {{- with include "apboa.nodeSelector" (dict "root" . "component" $c) }}{{ . | nindent 6 }}{{- end }}
+      {{- with include "apboa.tolerations" (dict "root" . "component" $c) }}{{ . | nindent 6 }}{{- end }}
+      {{- with include "apboa.affinity" (dict "root" . "component" $c) }}{{ . | nindent 6 }}{{- end }}
+      containers:
+        - name: gateway
+          image: {{ include "apboa.image" (dict "root" . "component" $c) }}
+          imagePullPolicy: {{ include "apboa.pullPolicy" (dict "root" . "component" $c) }}
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker
+            - name: TZ
+              value: {{ .Values.global.timezone | quote }}
+            - name: GATEWAY_ENABLED
+              value: "true"
+            {{- include "apboa.envMysql" . | nindent 12 }}
+            {{- include "apboa.envRedis" . | nindent 12 }}
+            {{- include "apboa.envJwt" . | nindent 12 }}
+            - name: SHELL_PROXY_ENABLED
+              value: "true"
+            # compose 中网关与 proxy 共享宿主机网络，用 127.0.0.1；
+            # K8s 改为走 proxy Service（hostNetwork Pod 可正常解析 ClusterIP）
+            - name: PROXY_HOST
+              value: {{ include "apboa.resourceName" (dict "root" . "component" "proxy") | quote }}
+            - name: PROXY_PORT
+              value: {{ .Values.proxy.service.port | quote }}
+            - name: CONSOLE_HOST
+              value: {{ include "apboa.consoleHost" . | quote }}
+            - name: GATEWAY_JAVA_HEAP_PERCENTAGE
+              value: {{ $c.javaHeapPercentage | quote }}
+            {{- include "apboa.envNodeId" . | nindent 12 }}
+            {{- with $c.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if $c.probes.enabled }}
+          # 无固定监听端口（web-application-type=none），用进程存活探针
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - grep -qa app.jar /proc/1/cmdline
+            periodSeconds: {{ $c.probes.periodSeconds }}
+            failureThreshold: 4
+          {{- end }}
+          resources:
+            {{- toYaml $c.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "apboa.dataVolumeMount" . | nindent 12 }}
+            {{- include "apboa.toolsVolumeMount" (dict "root" . "component" "gateway") | nindent 12 }}
+            {{- include "apboa.logsVolumeMount" (dict "root" . "component" "gateway" "path" "/app/logs") | nindent 12 }}
+      volumes:
+        {{- include "apboa.dataVolume" . | nindent 8 }}
+        {{- include "apboa.toolsVolume" . | nindent 8 }}
+        {{- include "apboa.logsVolume" . | nindent 8 }}
+{{- end }}

@@ -1,0 +1,59 @@
+# ============================================================
+# 单节点集群覆盖值（kind / minikube / docker-desktop / 单机 k3s）
+# 用法：helm install apboa ./deploy/helm/apboa -n apboa --create-namespace \
+#         -f ./deploy/helm/apboa/values-single-node.yaml
+# ------------------------------------------------------------
+# 单节点没有 RWX 存储供应商，共享目录改用 RWO：所有 Pod 会调度到同一节点，
+# 因此需要放宽反亲和（本 chart 默认未设反亲和，RWO 可直接使用）。
+# ============================================================
+
+persistence:
+  data:
+    # 单节点场景：同一节点上的多个 Pod 可共享同一个 RWO 卷
+    accessModes:
+      - ReadWriteOnce
+    size: 10Gi
+  tools:
+    accessModes:
+      - ReadWriteOnce
+    size: 2Gi
+
+# 单机体验按 compose-simple 的资源上限配置，避免压垮开发机
+console:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+runtime:
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 3Gi
+
+gateway:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+middleware:
+  mysql:
+    persistence:
+      size: 5Gi
+  pgvector:
+    persistence:
+      size: 5Gi
+
+frontend:
+  service:
+    type: NodePort
