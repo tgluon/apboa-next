@@ -5,6 +5,18 @@
 # ============================================================
 
 services:
+  # ==================== ollama ====================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: apboa-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - /home/ollama:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - apboa
+
   # ==================== MySQL ====================
   apboa-mysql:
     image: ${DOCKER_REGISTRY}mysql:8.0
