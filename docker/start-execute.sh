@@ -9,7 +9,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-COMPOSE_FILE="docker-compose-execute.yml"
+COMPOSE_FILE="docker-compose-execute-run.yml"
 ENV_FILE=".env.execute"
 SERVICE_NAME="Apboa 执行节点"
 
@@ -81,7 +81,7 @@ do_rebuild() {
 do_start() {
   echo ">> 启动 ${SERVICE_NAME}..."
   init_env
-  docker compose -f docker-compose-execute-run.yml up -d
+  docker compose -f "$COMPOSE_FILE" up -d
   echo "${SERVICE_NAME} 已启动"
 }
 

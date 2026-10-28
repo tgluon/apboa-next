@@ -9,7 +9,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-COMPOSE_FILE="docker-compose-middleware.yml"
+COMPOSE_FILE="docker-compose-middleware-run.yml"
 ENV_FILE=".env.middleware"
 SERVICE_NAME="Apboa 中间件"
 
@@ -45,7 +45,7 @@ do_rebuild() {
 do_start() {
   echo ">> 启动 ${SERVICE_NAME}..."
   init_env
-  docker compose -f docker-compose-middleware-run.yml up -d
+  docker compose -f "$COMPOSE_FILE"  up -d
   echo "${SERVICE_NAME} 已启动"
 }
 
