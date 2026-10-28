@@ -26,7 +26,7 @@ CREATE TABLE `account` (
   PRIMARY KEY (`id`)
 ) COMMENT='账号';
 
-INSERT INTO `account` (`id`, `nickname`, `email`, `username`, `password`, `enabled`, `created_at`, `updated_at`, `created_by`, `updated_by`, `remember_last_tenant`, `last_tenant_id`) VALUES (1111111111111111111, '管理员', 'admin@gmail.com', 'admin', '277fc0217db5d364b3b886a9672ea9d3', 1, '2026-02-07 18:50:51', '2026-06-07 15:28:49', NULL, 0, 0, 1);
+INSERT INTO `account` (`id`, `nickname`, `email`, `username`, `password`, `enabled`, `created_at`, `updated_at`, `created_by`, `updated_by`, `remember_last_tenant`, `last_tenant_id`) VALUES (1111111111111111111, '管理员', 'admin@gmail.com', 'admin', '9580ab5d9db022c73d6678b07c86c9db', 1, '2026-02-07 18:50:51', '2026-06-07 15:28:49', NULL, 0, 0, 1);
 
 DROP TABLE IF EXISTS `account_tenant`;
 CREATE TABLE `account_tenant` (
