@@ -10,6 +10,7 @@ import io.agentscope.core.ReActAgent;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.model.Model;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,6 +25,7 @@ import java.time.LocalDateTime;
 @RestController
 @RequestMapping("/runtime/model/config")
 @RequiredArgsConstructor
+@Slf4j
 public class CheckModelService {
     private final ModelConfigService modelConfigService;
     private final ChatModelFactory chatModelFactory;
@@ -52,6 +54,7 @@ public class CheckModelService {
             Msg msg = Msg.builder().textContent("hello").build();
             Msg response = agent.call(msg).block();
             if (response == null || response.getTextContent() == null) {
+                log.error("检测模型链接失败！");
                 // 检测失败：无响应
                 updateConnectivityResult(modelId, "FAILED", "模型无响应");
                 return R.data(new CheckModelResult(false, "模型无响应"));
@@ -61,6 +64,7 @@ public class CheckModelService {
             updateConnectivityResult(modelId, "CONNECTED", null);
             return R.data(new CheckModelResult(true, "连接成功"));
         } catch (Exception e) {
+            log.info("检测模型链接失败,异常为:{}",e);
             // 检测失败：异常
             updateConnectivityResult(modelId, "FAILED", e.getMessage());
             return R.data(new CheckModelResult(false, e.getMessage()));
