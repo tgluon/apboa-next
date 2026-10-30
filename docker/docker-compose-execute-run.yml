@@ -61,13 +61,12 @@ services:
     image: docker-apboa-gateway:latest
     container_name: apboa-gateway
     restart: unless-stopped
-    network_mode: host
     mem_limit: ${GATEWAY_MEM_LIMIT:-4g}
     cpus: ${GATEWAY_CPU_LIMIT:-4}
     environment:
       SPRING_PROFILES_ACTIVE: docker
       MYSQL_HOST: ${MYSQL_HOST}
-      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_PORT: ${MYSQL_PORT}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
@@ -92,6 +91,8 @@ services:
     depends_on:
       apboa-proxy:
         condition: service_started
+    networks:
+      - apboa
   # ==================== Shell 执行代理（runner-proxy） ====================
   apboa-proxy:
     image: docker-apboa-proxy:latest
