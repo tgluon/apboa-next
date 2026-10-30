@@ -37,6 +37,7 @@ RUN apt-get update && \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
+    && apt-get install -y --no-install-recommends telnet  \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 验证运行时

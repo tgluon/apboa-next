@@ -18,6 +18,11 @@ RUN mvn package -pl runner-websocket -am -DskipTests -q
 # 阶段二：运行镜像
 # ============================================================
 FROM ${JRE_IMAGE}
+# 安装 curl（基础网络工具）
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    apt-get install -y --no-install-recommends telnet && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
